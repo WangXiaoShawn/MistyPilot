@@ -1,0 +1,23 @@
+
+autogen-agentchat>=0.5.0
+autogen-core>=0.5.0 
+autogen-ext>=0.5.0
+
+# OpenAI相关
+openai>=1.0.0
+
+pydantic>=2.0.0
+typing-extensions>=4.0.0
+
+# HTTP请求库
+requests>=2.28.0
+
+# WebSocket支持
+websocket-client>=1.6.0
+
+# 向量数据库
+chromadb>=0.4.0
+
+mutagen>=1.47.0
+asyncio
+
