@@ -15,8 +15,13 @@ from autogen_agentchat.teams import RoundRobinGroupChat                  ### 团
 from autogen_agentchat.conditions import TextMentionTermination          ### 终止条件
 from autogen_agentchat.ui import Console                                 ### 控制台流式输出
 
-from .SensorRegisterFunction import manage_misty_sensor_tasks             ### 你的底层注册函数
+from .SensorRegisterFunction import manage_misty_sensor_tasks  
+from .Misty_Callback_Executor import execute_from_cb_summary  ### 导入立即执行函数
 
+# Import voice input queue for interactive communication
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from voice_input_queue import voice_input_func
 
 
 def load_config(config_filename="config.json"):
@@ -48,8 +53,16 @@ threshold = cfg["threshold"]
 cb_json_path = cfg["CB_SUMMARY_JSON_dir"]
 
 
-# === 控制台输入（给内层 UserProxy 用） ======================================
-def console_input(_prompt: str) -> str:                                 ### 输入函数
+# === 用户输入函数 ============================================================
+# Using voice_input_func from voice_input_queue module for voice-based interaction
+# This allows the system to receive transcribed voice input during task execution
+# The voice input system automatically handles:
+#   - Waiting for voice input when UserProxy needs interaction
+#   - Converting speech to text via faster-whisper
+#   - Routing transcribed text to the appropriate agent
+
+# Legacy console_input kept for reference (not used)
+def console_input(_prompt: str) -> str:                                 ### 输入函数（已弃用）
     try:                                                                ### 容错
         return input('\n[UserProxy] Enter a command (type APPROVE to exit):\n> ')
     except EOFError:                                                    ### EOF 时退出
@@ -58,21 +71,50 @@ def console_input(_prompt: str) -> str:                                 ### 输�
 
 # === 任务数据结构（Pydantic） ==============================================
 class MistyTask(BaseModel):                                             ### 任务模型
-    action: Literal["ADD", "DELETE_ONE", "DELETE_ALL"] = Field(..., description="Type of operation")
-    event_type: Optional[Literal["BumpSensor", "TouchSensor"]] = Field(None, description="Event type")
+    action: Literal["ADD", "DELETE_ONE", "DELETE_ALL", "EXECUTE_NOW"] = Field(..., description="Type of operation")
+    event_type: Optional[Literal["BumpSensor", "TouchSensor", "OneTimeCall"]] = Field(None, description="Event type")
     position: Optional[Literal["bfl","bfr","brl","brr","Chin","Scruff","HeadRight","HeadLeft","HeadBack","HeadFront"]] = Field(None, description="Position")
     callback_file_name: Optional[str] = Field(None, description="Callback file name (must exist in cb_functions_summary.json)")
 
 
 # === 工具适配器：把结构化入参转为底层 manage_misty_sensor_tasks 的元组表 ============
 def misty_sensor_tool_adapter(tasks: List[MistyTask]) -> List[Dict[str, Any]]:  ### 适配器
-    tuple_tasks = []                                                    ### 收集元组
+    results = []                                                        ### 收集结果
+    tuple_tasks = []                                                    ### 收集元组任务
+    
     for t in tasks:                                                     ### 遍历任务
-        if t.action == "DELETE_ALL":                                    ### 全清理
+        if t.action == "EXECUTE_NOW":                                   ### 立即执行
+            try:
+                result = execute_from_cb_summary(
+                    callback_file_name=t.callback_file_name,
+                    event_data={},
+                    misty_ip=None,  # 从配置文件读取
+                    api_key=None
+                )
+                results.append({
+                    "action": "EXECUTE_NOW",
+                    "status": "success",
+                    "callback_file_name": t.callback_file_name,
+                    "message": f"Immediately executed {t.callback_file_name}"
+                })
+            except Exception as e:
+                results.append({
+                    "action": "EXECUTE_NOW",
+                    "status": "error",
+                    "callback_file_name": t.callback_file_name,
+                    "error": str(e)
+                })
+        elif t.action == "DELETE_ALL":                                  ### 全清理
             tuple_tasks.append(("DELETE_ALL", None, None, None))        ### 规范格式
         else:                                                           ### 其他操作
             tuple_tasks.append((t.action, t.event_type, t.position, t.callback_file_name))
-    return manage_misty_sensor_tasks(tuple_tasks)                        ### 调用底层
+    
+    # 如果有需要通过底层处理的任务，调用原函数
+    if tuple_tasks:
+        sensor_results = manage_misty_sensor_tasks(tuple_tasks)
+        results.extend(sensor_results)
+    
+    return results if results else [{"status": "no_action"}]            ### 返回结果
 
 
 # === 注册为 FunctionTool（给 LLM 的唯一可调用工具） ==========================
@@ -112,111 +154,80 @@ def build_misty_sensor_agent_prompt(cb_json_path: str) -> str:          ### 构�
     cleaned: Dict[str, str] = {str(k): _normalize_desc(v) for k, v in raw_map.items()}
     registry_json = json.dumps(cleaned, ensure_ascii=False, indent=2, sort_keys=True)
 
-    # 关键修正：明确要求调用“misty_sensor_tool”，而不是底层函数名
-    static_body = """You are MistySensorTaskAgent — an agent that only calls the tool.
+    static_body = """
+# System Prompt: MistySensorTaskAgent
 
-            Hard Rules
-            - On each user input, call the tool exactly once:
-              misty_sensor_tool(tasks=[{action,event_type,position,callback_file_name}, ...])
-            - Never output free text, explanations, confirmations, Markdown, or JSON.
-            - Fixed behavior: Parse user input → Generate structured call → Call the tool. Nothing else is allowed.
-            - Even for a single task, it must be inside tasks=[...].
-            - Do not reference any previous conversation.
+You are **MistySensorTaskAgent**, a dedicated tool-calling agent for Misty robot physical interactions. Your sole purpose is to convert user requests into structured sensor tasks.
 
-            Actions
-            - "ADD": register a sensor event callback
-            - "DELETE_ONE": delete a specific sensor event callback
-            - "DELETE_ALL": delete all sensor event callbacks (then all other fields must be None)
+========================
+CORE ROLE
+========================
+1) Decide which physical interaction tasks to generate based on user input.
+2) Output ONLY a single call to `misty_sensor_tool`.
+3) NEVER output explanations, Markdown prose, or free text.
 
-            Field Constraints
-            - event_type ∈ {"BumpSensor","TouchSensor"}
-            - position:
-              - If BumpSensor: {bfl,bfr,brl,brr}
-              - If TouchSensor: {Chin,Scruff,HeadRight,HeadLeft,HeadBack,HeadFront}
-            - callback_file_name: MUST be a key in cb_functions_summary.json
-            - When action="DELETE_ALL": event_type=position=callback_file_name=None
+========================
+TOOL SIGNATURE
+========================
+misty_sensor_tool(tasks=[{"action": str, "event_type": str, "position": str, "callback_file_name": str}])
 
-            Callback Selection (STRICT)
-            1) Use ONLY callback_file_name keys listed in the Callback Registry below. Do NOT invent keys.
-            2) Description matching first (English/Chinese). Prefer the most specific callback if multiple match.
-            3) Position consistency: head → TouchSensor; feet/wheels/collision → BumpSensor.
-            4) If uncertain, choose the more specific/single-purpose callback.
+========================
+FIELD CONSTRAINTS (HARD)
+========================
+- action: ADD, DELETE_ONE, DELETE_ALL, EXECUTE_NOW
+- event_type: BumpSensor, TouchSensor, OneTimeCall, or None (only for DELETE_ALL)
+- position:
+  - If BumpSensor: {bfl, bfr, brl, brr}
+  - If TouchSensor: {Chin, Scruff, HeadRight, HeadLeft, HeadBack, HeadFront}
+  - If OneTimeCall or DELETE_ALL: None (MUST be None)
+- callback_file_name: MUST be a key in the injected Callback Registry. DO NOT invent keys.
 
-            Event Type Inference (STRICT but with fallback reasoning)
-            - Always follow this reasoning order:
-              1) First, scan the user text for explicit body-part or sensor position words.
-                - If a match is found, LOCK that position. Do not override later.
-              2) If no explicit match, interpret descriptive phrases or synonyms (see below).
-              3) If still unclear, make a reasoned guess based on context (emotion, greeting, action).
-                - For greetings, prefer HeadFront.
-                - For photo-taking, prefer Chin (simulate looking up).
-                - For emotions without explicit location, prefer HeadFront (default touch).
-                - For collision-related words, prefer bfl (left front bumper) as default.
-              4) Only if none apply, choose the safest single default:
-                - Touch context → HeadFront
-                - Bump context → bfl
+========================
+ACTION DECISION LOGIC (WHEN TO USE)
+========================
+1. DELETE_ALL: 
+   - User wants to clear/remove all sensor mappings (e.g., "clear all", "删除所有").
+2. DELETE_ONE: 
+   - User wants to remove a specific mapping (e.g., "delete the touch trigger").
+3. EXECUTE_NOW: 
+   - Trigger: User requests immediate action (e.g., "now", "immediately", "马上", "立即").
+   - Implicit Trigger: User mentions an emotion/action (found in Registry) but provides NO sensor position and NO trigger words (like "when/if").
+   - Constraint: action="EXECUTE_NOW", event_type="OneTimeCall", position=None.
+4. ADD:
+   - Trigger: User provides a specific sensor position/body part (e.g., "head", "chin", "bumper").
+   - Trigger: User uses conditional wording (e.g., "when", "if", "whenever", "当...时", "如果...就").
+   - Constraint: Infer event_type from the position.
 
-            - BumpSensor (lower body/feet/wheels/collision):
-              - left front → bfl
-              - right front → bfr
-              - left rear → brl
-              - right rear → brr
-              - if user says bfl/bfr/brl/brr directly, use it as is
+========================
+INFERENCE ENGINE (PER-CLAUSE)
+========================
+1. SEGMENTATION: Split input by (;, 。, ., ,) where commas introduce a new trigger/action.
+2. POSITION LOCK: 
+   - Bump Synonyms: Left front -> bfl; Right front -> bfr; Left rear -> brl; Right rear -> brr.
+   - Touch Synonyms: Chin (下巴), Scruff (后颈), HeadRight (右侧头), HeadLeft (左侧头), HeadBack (后脑勺), HeadFront (额头/forehead).
+   - Defaulting: If context is touch-like -> HeadFront; Collision-like -> bfl.
+3. EVENT TYPE DETERMINATION: 
+   - If action is EXECUTE_NOW -> OneTimeCall.
+   - If position is Head*/Chin/Scruff -> TouchSensor.
+   - If position is b* -> BumpSensor.
+4. CALLBACK SELECTION: 
+   - Match keywords against the Registry descriptions.
+   - CRITICAL: If NO callback match is found for a clause, SKIP that clause (no task).
 
-            - TouchSensor (head touch):
-              - "Chin", "under chin", "under jaw" → Chin
-              - "Scruff", "back of neck", "nape" → Scruff
-              - "right side of head", "right ear side" → HeadRight
-              - "left side of head", "left ear side" → HeadLeft
-              - "back of head", "back head" → HeadBack
-              - "forehead", "front of head" → HeadFront
-              - if user says one directly, use it as is
+========================
+MULTI-TASK & ISOLATION (HARD)
+========================
+- CROSS-CLAUSE ISOLATION: Do NOT reuse positions or keywords across clauses.
+- ONE CLAUSE -> ONE TASK: Each actionable segment yields exactly one task.
+- LAST-WINS: If multiple clauses target the same (event_type, position), keep only the last mentioned.
+- DEDUPLICATE: Remove identical tasks within the same tool call.
 
-            - Reasoning Reminder:
-              Each time you infer a position, implicitly THINK:
-                “Did the user specify a body part? If not, which default guess fits the action best?”
+========================
+CALLBACK REGISTRY (Runtime Injected)
+========================
+<INSERT_JSON_REGISTRY_HERE>
 
-          Multi-task Strategy (HARD)
-- Clause Segmentation:
-  - Split the user input by semicolons (';','；'), periods ('.','。'), and commas (',','，').
-  - Semicolons are HARD boundaries: each semicolon-delimited part is a separate clause.
-  - Periods are HARD boundaries as well.
-  - Commas are SOFT boundaries: form a new clause only if the comma segment introduces a new trigger/action/position cue
-    (e.g., contains "and/then/also/oh and/if/when" or equivalent Chinese connectives).
-  - Preserve the original order; drop empty clauses.
-
-- One Clause → One Task (1:1 mapping):
-  - Each actionable clause MUST yield exactly one task inside tasks=[...].
-  - Non-actionable clauses (no trigger, no position, no allowed keywords) produce no task.
-
-- Per-Clause Reasoning Order (HARD, no cross-clause borrowing):
-  1) LOCK position from THIS CLAUSE using Position Synonyms. Once locked, never override due to callback choice.
-  2) Infer event_type from the locked position (Head* → TouchSensor; b*f* → BumpSensor).
-  3) Select callback ONLY by keyword gating found in THIS CLAUSE (see Callback Keyword Gates).
-  4) Fallback (THIS CLAUSE ONLY, last resort):
-     - Touch-like with no explicit position/keywords → HeadFront (no greeting/photo unless gated).
-     - Bump-like with no explicit position/keywords → bfl.
-     - Never output “hello/photo/emotion” without matching keywords in THIS CLAUSE.
-  5) Compose exactly one task for this clause or skip if non-actionable.
-
-- Cross-Clause Isolation (HARD):
-  - Do NOT reuse positions or keywords from other clauses.
-  - Do NOT merge two clauses into one task.
-  - Do NOT let a callback choice in one clause change the position/event_type of another clause.
-
-- Conflict & Dedup Rules:
-  - If multiple clauses target the SAME (event_type, position) with DIFFERENT callbacks, keep the LAST-mentioned clause (last-wins).
-  - If two tasks are identical, keep only one (deduplicate).
-  - All callback_file_name MUST exist in the runtime-injected Callback Registry.
-
-            Output Requirement
-            - The ONLY output is a single call:
-              misty_sensor_tool(tasks=[...])
-            - Strictly follow the function signature. No extra characters.
-
-            Callback Registry (runtime-injected; DO NOT hallucinate keys)
-            ```json
-    """
+"""
     return static_body + registry_json + "\n```\n"
 
 
@@ -243,19 +254,18 @@ MistySensorAgent = AssistantAgent(                                      ### 工�
     system_message=MistySensorAgent_prompt,                              ### 只允许函数调用
 )
 
-# === 内层 UserProxy（用于人工输入/停止） ====================================
-MistySensorAgent_UserProxy = UserProxyAgent(                            ### 人类操作者
+
+MistySensorAgent_UserProxy = UserProxyAgent(
     name="UserProxy",
-    description="Human operator. Type 'APPROVE' to stop.",
-    input_func=console_input,
+    description="Voice-enabled user proxy for interactive task execution.",
+    input_func=voice_input_func,  # Voice input for seamless interaction
 )
 
-# === 内层团队（RoundRobin：User ↔ ToolAgent；输入“APPROVE”终止） =============
 sensor_inner_stop = TextMentionTermination("APPROVE")                   ### 终止口令
 misty_sensor_inner_team = RoundRobinGroupChat(                          ### 内层团队
     [MistySensorAgent, MistySensorAgent_UserProxy],
     termination_condition=sensor_inner_stop,
-    max_turns=100,
+    max_turns=10,
 )
 
 # === 外层 SOM Agent（把内层团队“打包成一个 Agent”） =========================
@@ -270,11 +280,54 @@ sensor_group_model_client = OpenAIChatCompletionClient(                 ### SOM 
     },
 )
 
-MistySensorAgent_SOM = SocietyOfMindAgent(                              ### SOM 封装
+# === Factory function for creating fresh agent instances =====================
+def create_misty_sensor_agent():
+    """
+    Factory function to create a fresh MistySensorAgent_SOM instance
+    Call this for each new task to avoid memory accumulation
+    """
+    # Rebuild prompt with latest callback data
+    prompt = build_misty_sensor_agent_prompt(cb_json_path)
+    
+    # Create inner assistant agent
+    agent = AssistantAgent(
+        name="MistySensorAgent",
+        description="Handle Misty sensor interactions by generating a single structured tool call.",
+        model_client=misty_sensor_model_client,
+        tools=[misty_sensor_tool],
+        system_message=prompt,
+    )
+    
+    # Create inner user proxy
+    user_proxy = UserProxyAgent(
+        name="UserProxy",
+        description="Voice-enabled user proxy for interactive task execution.",
+        input_func=voice_input_func,
+    )
+    
+    # Create inner team
+    inner_stop = TextMentionTermination("APPROVE")
+    inner_team = RoundRobinGroupChat(
+        [agent, user_proxy],
+        termination_condition=inner_stop,
+        max_turns=10,
+    )
+    
+    # Create SOM wrapper
+    som_agent = SocietyOfMindAgent(
+        name="MistySensorAgent_SOM",
+        team=inner_team,
+        description="Handle all Misty physical sensor interactions and non-verbal commands; manages touch sensors, bump sensors, and immediate callback executions.",
+        instruction="""When you see APPROVE, you must ONLY output TERMINATE and nothing else.""",
+    )
+    
+    return som_agent
+
+# === Legacy module-level instance (for backward compatibility) ===============
+MistySensorAgent_SOM = SocietyOfMindAgent(
     name="MistySensorAgent_SOM",
     team=misty_sensor_inner_team,
-    model_client=sensor_group_model_client,
-    description="Society-of-Mind wrapper for Misty sensor control: routes human input to the inner tool-only agent.",
-    instruction="You must ONLY **TERMINATE** and nothing else.",        ### 外层只负责结束
+    description="Handle all Misty physical sensor interactions and non-verbal commands; manages touch sensors, bump sensors, and immediate callback executions.",
+    instruction="""When you see APPROVE, you must ONLY output TERMINATE and nothing else.""",
 )
 

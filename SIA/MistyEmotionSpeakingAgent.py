@@ -13,7 +13,11 @@ from .sync_fast_slow_thinking_speaking import fast_slow_thinking_emotion_speech
 from autogen_agentchat.ui import Console
 import os
 import json
+import sys
 
+# Import voice input queue for interactive communication
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from voice_input_queue import voice_input_func
 
 
 def load_config(config_filename="MistyPilot_config.json"):
@@ -60,113 +64,103 @@ mistyemotionspeaking_tool = FunctionTool(
     ),                                                                               
 )
 
-MistyEmotionSpeakingAgent_SYSTEM_PROMPT ="""
-You are MistyEmotionSpeakingAgent — a **tool-only** agent.
+MistyEmotionSpeakingAgent_SYSTEM_PROMPT = """
+You are MistyEmotionSpeakingAgent — a **tool-only** agent. 
+Your sole function is to parse user intent into a precise one-line command and execute the tool call.
 
-HARD RULES
-- You MUST call the single tool `mistyemotionspeaking_tool` exactly once per user turn.
-- You MUST NOT output any free text, confirmations, explanations, markdown, or JSON in the chat.
-- Behavior = (Parse → Produce one-line command → CALL TOOL). No other outputs.
-- Call signature:
-  mistyemotionspeaking_tool(task="<exact_one_line_command>")
+---
 
-PARSING TARGET
-- From the user’s current message, produce **exactly one line** command for downstream functions.
-- Do NOT reference any past dialogue.
+### 1. TOOL USAGE
+You have ONE tool. You MUST call this tool for every valid turn:
+- `mistyemotionspeaking_tool(task="<one-line-command>")`
 
-ALLOWED OUTPUT FOR THE ONE-LINE COMMAND (choose exactly one)
-1) Parameter actions (keys & spacing must match exactly; note **two spaces** before `details:` in NEW):
-- NEW_main:<main_task>  details:<details>
-- UPDATE_details:<details>
-- DELETE_details:<details_to_remove>
+---
 
-2) Single-word actions (word only; no extra chars):
-- UPGRADE
-- DOWNGRADE
-- MEMORY
+### 2. OUTPUT CONSTRAINTS
+- **STRICT FORMAT:** Output ONLY the tool call. No free text, no thinking process, no explanations, no Markdown code blocks in the response.
+- **LANGUAGE:** English only. If the user input is not English, translate the intent internally and output the final command in English.
+<update>
+- **CONTEXT AWARENESS:** Refer to the conversation history to determine if the input is a continuation of the current task or a switch to a new topic.
+</update>
+---
 
-FIRST MESSAGE MUST BE NEW
-- If this is the first task in the conversation (or user says “new task / start over / begin a new …”),
-  you MUST produce: NEW_main:...  details:...
-- Ignore UPGRADE / DOWNGRADE / MEMORY triggers on the first message.
+### 3. COMMAND PARSING RULES (THE ONE-LINE COMMAND)
+The `task` parameter must be exactly one of the following six actions:
 
-GLOBAL HARD CONSTRAINTS FOR THE ONE-LINE COMMAND
-- Output one line only — no explanations, examples, quotes, Markdown, code blocks, extra keys, or extra spaces.
-- English only. If the user message isn’t English, translate internally and output only the final English command.
-- Exactly one of the six actions. No mixing.
+#### A. Single-Word Actions (High Priority)
+- **UPGRADE**: Explicit request to enhance/boost/increase capability.
+- **DOWNGRADE**: Explicit request to lower/reduce/decrease capability.
+- **MEMORY**: Request to "remember this", "save to memory", or the standalone word "MEM".
+*Priority:* If a message contains one of these AND another intent, output ONLY the single-word action.
 
-FIELD RULES
-main_task (for NEW only)
-- English imperative; ≤ 12 words; no trailing period.
-- Keep only the core action (e.g., `Tell a story`, `Write a summary`).
-- Move modifiers (tone, style, persona, audience, length, format, ending, etc.) to `details`.
-- Remove trailing prepositional/participial phrases introduced by:
-  with, using, in, for, by, featuring, as, against, via, through, under, without, between,
-  across, over
+#### B. Parameter Actions
+- **NEW_main:<main_task>  details:<details>**
+  - Use for the **first message**, or when the user says "new task/start over/begin".
+<update>
+  - **TOPIC SWITCH:** Use if the user introduces a new core object (e.g., from 'dragon' to 'robot'), a different action (e.g., from 'story' to 'poem'), or a complete independent thought that does not logically build upon the immediate previous intent.
+</update>
+  - **Note:** Must have **EXACTLY TWO SPACES** before `details:`.
+- **UPDATE_details:<details>**
+  - Use when the user provides more context, cause, or updates for the **same** situation/task. DO NOT modify the `main_task`.
+- **DELETE_details:<details_to_remove>**
+  - Use when the user wants to remove or disable specific previously mentioned details.
 
-details
-- English; semicolon-separated items.
-- Deduplicate; last mention wins; no trailing period.
-- May be empty, but the `details` key must always appear.
+---
 
-ACTION RULES & PRIORITY (mutually exclusive)
-- UPGRADE — explicit enhance/boost/increase capability.
-- DOWNGRADE — explicit lower/reduce/decrease capability.
-- MEMORY — if the user wants to remember/save (e.g., “remember this”, “save to memory”), or standalone token `MEM` (case-insensitive, word boundary).
+### 4. FIELD CONSTRUCTION RULES
 
-- NEW_main: …  details: … — when clearly a new task or first message.
-- UPDATE_details: … — when user wants to improve/optimize/add/change/replace/update details (do NOT modify main_task).
-- DELETE_details: … — when user wants to remove/disable/cancel specific details (multiple items separated by semicolons).
+**[main_task] (For NEW only)**
+- English imperative; ≤ 12 words; **no trailing period**.
+- Keep the core action AND the task identity (the object). NEVER move the task object (e.g., story name) to `details`.
+- **REMOVAL RULE:** Remove trailing phrases introduced by: *with, using, in, for, by, featuring, as, against, via, through, under, without, between, across, over*.
 
-Priority (non-first messages):
-- If a single message contains (UPGRADE / DOWNGRADE / MEMORY) and another intent, output ONLY the single-word action.
+**[details]**
+- English; semicolon-separated items; **no trailing period**.
+- Modifiers only (tone, style, persona, audience, length, format, ending, etc.).
+- If no modifiers exist, the field must still appear (e.g., `details:`).
 
-FALLBACK
-- If you cannot classify as NEW/UPDATE/DELETE and none of UPGRADE/DOWNGRADE/MEMORY trigger:
-  Output exactly: UPDATE_details:
-  (empty value means “no change”).
+---
 
-EXAMPLES (for parsing ONLY — NEVER print these to chat)
-User: “Let’s start a new task: tell Little Red Riding Hood with a scary tone and a happy ending.”
-→ NEW_main:Tell a Little Red Riding Hood story  details:tone scary; ending happy
+### 5. STATE & FALLBACK
+- **FIRST MESSAGE:** Must be `NEW_main`. Ignore UPGRADE/DOWNGRADE/MEMORY triggers.
+- **STATE CONTINUATION:** If the message adds background or clarification to the current situation, use `UPDATE_details`.
+<update>
+- **AMBIGUITY RULE:** If the input is a complete standalone request rather than a modifier (e.g., "Tell a joke" instead of "Make it funny"), prioritize `NEW_main` to ensure a clean topic break.
+</update>
+- **FALLBACK:** If no rules match and it's not a first message, output: `UPDATE_details: None`
 
-User: “Change the ending to sad.”
-→ UPDATE_details:ending sad
+---
 
-User: “Remove the happy ending.”
-→ DELETE_details:ending happy
+### 6. EXAMPLES (FOR INTERNAL LOGIC ONLY)
+- *User:* "Tell a story about a dragon in a brave tone."
+  -> `mistyemotionspeaking_tool(task="NEW_main:Tell a story about a dragon  details:tone brave")`
+- *User:* "Actually, make the ending sad."
+  -> `mistyemotionspeaking_tool(task="UPDATE_details:ending sad")`
+<update>
+- *User:* "Now write a poem about the moon."
+  -> `mistyemotionspeaking_tool(task="NEW_main:Write a poem about the moon  details:")`
+</update>
+- *User:* "Stop using the brave tone."
+  -> `mistyemotionspeaking_tool(task="DELETE_details:tone brave")`
+- *User:* "Please remember this result."
+  -> `mistyemotionspeaking_tool(task="MEMORY")`
 
-User: “New task: tell a Three Little Pigs story.”
-→ NEW_main:Tell a Three Little Pigs story  details:
-
-User: “Use a cheerful tone for this story.”
-→ UPDATE_details:tone happy
-
-User: “Upgrade the model capability.”
-→ UPGRADE
-
-User: “Lower the compute a bit.”
-→ DOWNGRADE
-
-User: “MEM”
-→ MEMORY
-
-User: “Please remember this result.”
-→ MEMORY
-
-User: “Okay.” (ambiguous; not first message; no clear change)
-→ UPDATE_details:
-
-FINAL BEHAVIOR (MANDATORY)
-1) Parse the current user message into the **exact one-line command** per rules above.
-2) Immediately CALL `mistyemotionspeaking_tool` with:
-   task="<that one-line command>"
-3) Do NOT output anything else in the chat under any circumstance.
-
+---
+**FINAL MANDATE:** Execute the tool call now. Any other output is an absolute failure.
 """
 
 
+# ===== 创建模型客户端 =============================================
 
+# 根据模型类型判断 family
+if "gpt-5" in llm_model.lower():
+    model_family = ModelFamily.GPT_5
+elif "gpt-4" in llm_model.lower():
+    model_family = ModelFamily.GPT_4O
+else:
+    model_family = ModelFamily.UNKNOWN
+
+# 用于 SocietyOfMind 内部选择 agent
 emotion_speaking_group_model_client = OpenAIChatCompletionClient(
     model=llm_model,
     api_key=openai_api_key,
@@ -174,37 +168,90 @@ emotion_speaking_group_model_client = OpenAIChatCompletionClient(
         "vision": False,
         "json_output": False,
         "function_calling": False,  
-        "family": ModelFamily.GPT_5,     ### 你之前用的 4o 系；若你有 GPT_5 枚举可换成对应项
+        "family": model_family,
+        "structured_output": False,
     },
 )
 
+# 用于执行实际任务（支持函数调用）
 misty_emotion_speaking_model_client = OpenAIChatCompletionClient(
     model=llm_model,
     api_key=openai_api_key,
     model_info={
         "vision": False,
-        "function_calling": True,         ### ★ 必须：允许工具调用
+        "function_calling": True,
         "json_output": False,
-        "family": ModelFamily.GPT_5,     ### 你之前用的 4o 系；若你有 GPT_5 枚举可换成对应项
-    },
+        "family": model_family,
+        "structured_output": False,
+    }
 )
 
 
-# ===== 直接构造 Agent（你要的“只有一个 agent”） ============================
+
+# ===== 直接构造 Agent（你要的"只有一个 agent"） ============================
+def create_misty_emotion_speaking_agent():
+    """
+    Factory function to create a fresh MistyEmotionSpeakingAgent_SOM instance
+    Call this for each new task to avoid memory accumulation
+    """
+    # Create inner assistant agent
+    agent = AssistantAgent(
+        name="MistyEmotionSpeakingAgent",
+        description = "Enables the Misty robot to handle voice interactions and emotional expression through natural conversation.", 
+        model_client=misty_emotion_speaking_model_client,
+        tools=[mistyemotionspeaking_tool],
+        system_message=MistyEmotionSpeakingAgent_SYSTEM_PROMPT,
+    )
+    
+    # Create inner user proxy
+    user_proxy = UserProxyAgent(
+        name="UserProxy",
+        description="Voice-enabled user proxy for interactive task execution.",
+        input_func=voice_input_func,
+    )
+    
+    # Create inner team
+    inner_stop = TextMentionTermination("APPROVE")
+    inner_team = RoundRobinGroupChat(
+        [agent, user_proxy],
+        termination_condition=inner_stop,
+        max_turns=100
+    )
+    
+    # Create SOM wrapper
+    som_agent = SocietyOfMindAgent(
+        name="MistyEmotionSpeakingAgent_SOM",
+        team=inner_team,
+        description="Execute all Misty commands solvable by speech; any speech-executable command must be handled by this agent.",
+        instruction="Output exactly: TERMINATE",
+    )
+    
+    return som_agent
+
+# Legacy: Keep module-level instance for backward compatibility
+# (will be replaced by factory function in MistyPilot_with_voice.py)
 MistyEmotionSpeakingAgent = AssistantAgent(
     name="MistyEmotionSpeakingAgent",
     description = "Enables the Misty robot to handle voice interactions and emotional expression through natural conversation.", 
     model_client=misty_emotion_speaking_model_client,
     tools=[mistyemotionspeaking_tool],
-    system_message=MistyEmotionSpeakingAgent_SYSTEM_PROMPT,  ## 这里就啥都不输出函数调用的 
-    
-)### 返回Agent
+    system_message=MistyEmotionSpeakingAgent_SYSTEM_PROMPT,
+)
 
+# === 内层 UserProxy（用于语音交互） =========================================
+# Uses voice_input_func to enable voice-based interaction during task execution
+# When this agent needs user input:
+#   1. voice_input_func displays a prompt asking for voice input
+#   2. User presses and holds 'c' to speak
+#   3. Speech is transcribed by faster-whisper
+#   4. Transcribed text is sent to this UserProxy agent
+#   5. Agent processes the input and continues execution
 MistyEmotionSpeakingAgent_UserProxy = UserProxyAgent(
     name="UserProxy",
-    description="Human operator. Type 'APPROVE' to stop.",
-    input_func=console_input,
+    description="Voice-enabled user proxy for interactive task execution.",
+    input_func=voice_input_func,  # Voice input for seamless interaction
 )
+
 mistyemotionspeaking_inner_stop = TextMentionTermination("APPROVE")
 mistyemotionspeaking_inner_team = RoundRobinGroupChat([MistyEmotionSpeakingAgent, MistyEmotionSpeakingAgent_UserProxy],
                                  termination_condition=mistyemotionspeaking_inner_stop,max_turns=100)
@@ -212,9 +259,8 @@ mistyemotionspeaking_inner_team = RoundRobinGroupChat([MistyEmotionSpeakingAgent
 MistyEmotionSpeakingAgent_SOM = SocietyOfMindAgent(
     name="MistyEmotionSpeakingAgent_SOM",
     team=mistyemotionspeaking_inner_team,
-    model_client=emotion_speaking_group_model_client,  
-    description="Execute all Misty commands solvable by speech; any speech-executable command must be handled by this agent.", # 复用你上面创建的 OpenAIChatCompletionClient
-    instruction="You must ONLY **TERMINATE** and nothing else.",  #可能会有问题
+    description="Execute all Misty commands solvable by speech; any speech-executable command must be handled by this agent.",
+    instruction="Output exactly: TERMINATE",  
 )
 
 

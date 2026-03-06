@@ -1,7 +1,54 @@
 # -*- coding: utf-8 -*-
 ### 删除所有 loop 的单次动作版本
 import time                             ### time for sleeps
+import json                             ### for config loading
+import os                               ### for path operations
 from .CUBS_Misty_Only_Raw_Actions import Robot            ### your Misty wrapper
+
+# Global configuration cache
+_config_cache = None
+
+def get_misty_ip(config_path: str = "./MistyPilot_config.json") -> str:
+    """
+    Get Misty robot IP from config file.
+    
+    Parameters:
+        config_path: Path to the configuration JSON file
+        
+    Returns:
+        str: Misty robot IP address
+    """
+    global _config_cache
+    if _config_cache is None:
+        # Handle relative path from the module location
+        if not os.path.isabs(config_path):
+            # Get the directory of this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Go up one level to project root
+            project_root = os.path.dirname(current_dir)
+            config_path = os.path.join(project_root, os.path.basename(config_path))
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            _config_cache = json.load(f)
+    
+    return _config_cache.get("misty_ip", "127.0.0.1")
+
+def perform_neutral_action(misty_ip, pause_before_reset=1.0):
+    """
+    中立/无情感 (Neutral): 
+    第九个动作，作为所有情绪的基准。
+    """
+    misty = Robot(misty_ip)
+    try:
+        # 直接调用你类中定义的 return_to_normal 逻辑
+        misty.change_led(red=255, green=255, blue=255)
+        misty.emotion_DefaultContent()
+        misty.move_arms(leftArmPosition=90, rightArmPosition=90, duration=0.5)
+        misty.move_head(pitch=0, yaw=0, roll=0, duration=0.5)
+        time.sleep(pause_before_reset)
+    finally:
+        misty.return_to_normal()
+        
 
 def perform_arousal_action(misty_ip, pause_before_reset=1.0):
     """
@@ -225,3 +272,23 @@ def perform_distress_action(misty_ip: str, pause_before_reset: float = 1.0) -> N
         time.sleep(pause_before_reset*0.7)
     finally:
         misty.return_to_normal()
+
+if __name__ == "__main__":
+    # Automatically load Misty IP from config file
+    try:
+        misty_ip = get_misty_ip()
+        print(f"Loaded Misty IP from config: {misty_ip}")
+        
+        # Test one emotion action
+        print("Performing neutral action...")
+        perform_neutral_action(misty_ip, pause_before_reset=1.5)
+        print("Action completed!")
+
+        
+    except FileNotFoundError:
+        print("Error: MistyPilot_config.json not found!")
+        print("Please make sure the config file exists in the project root directory.")
+    except KeyError:
+        print("Error: 'misty_ip' not found in config file!")
+    except Exception as e:
+        print(f"Error: {e}")

@@ -24,6 +24,7 @@ from .emotion_actions import (                                                  
     perform_pleasure_action,         ### 愉快
     perform_contentment_action,      ### 满足/安逸
     perform_depression_action,       ### 抑郁
+    perform_neutral_action,          ### 中立
 )
 
 # ------------------------ 情绪 -> 语速/指令 映射 -------------------------------------------------------
@@ -36,7 +37,8 @@ EMOTION_SPEED = {                                                               
     "Contentment": 0.9,                                                              ### 满足/安逸：略慢
     "Sleepiness": 0.9,                                                               ### 困倦：慢
     "Depression": 0.9,                                                               ### 抑郁：慢
-    "Misery": 0.9,                                                                   ### 痛苦：慢
+    "Misery": 0.9,    
+    "Neutral": 1,                                                                  ### 痛苦：慢
 }
 
 EMOTION_INSTRUCTIONS = {                                                             ### 情绪到风格指令
@@ -73,6 +75,10 @@ EMOTION_INSTRUCTIONS = {                                                        
         "Speak in a tense, anxious tone. Maintain a slightly fast pace with clipped phrases, "
         "short irregular pauses conveying urgency, and sharp emphasis on key words while remaining clear."
     ),
+    "Neutral": (
+        "Speak in a neutral, calm tone. Use a normal pace with even intonation, "
+        "balanced pauses, and a clear, friendly delivery."
+    ),
 }
 
 # ------------------------ 情绪 -> 动作函数映射 + 别名规范化 ---------------------------------------------
@@ -86,6 +92,7 @@ EMOTION_ACTIONS = {                                                             
     "Sleepiness":   perform_sleepiness_action,                                       ### 困倦
     "Depression":   perform_depression_action,                                       ### 抑郁
     "Misery":       perform_misery_action,                                           ### 痛苦
+    "Neutral":      perform_neutral_action,                                          ### 中立
 }
 
 _EMOTION_ALIASES = {                                                                 ### 别名->规范名（小写匹配）
@@ -97,6 +104,7 @@ _EMOTION_ALIASES = {                                                            
     "sleepiness":"Sleepiness", "困倦":"Sleepiness", "犯困":"Sleepiness", "想睡":"Sleepiness",
     "depression":"Depression", "抑郁":"Depression", "低落":"Depression",
     "misery":"Misery", "痛苦":"Misery",
+    "neutral":"Neutral", "中立":"Neutral", "平静":"Neutral", "冷静":"Neutral",
 }
 
 def _canonical_emotion(e: Optional[str]) -> Optional[str]:
@@ -203,9 +211,10 @@ def _append_tts_json_record(                                                    
     text: str,                                                                        ### 说话文本
     emotion: Optional[str],                                                           ### 情绪（规范名或 None）
     mp3_b64: str,                                                                     ### mp3 的 base64 字符串
+    duration_sec: Optional[float] = None,                                             ### NEW: 音频时长（秒）
     json_file: str = "temp_emotion_speaking_mp3.json",                                ### 保存文件名
 ) -> None:                                                                            ### 无返回
-    """增量保存：读取现有 list，append 当前 {text, emotion, mp3}，再写回。"""                   ###
+    """增量保存：读取现有 list，append 当前 {text, emotion, mp3, duration_sec}，再写回。"""      ###
     try:
         with _json_lock:                                                              ### 并发写保护
             arr = []
@@ -216,7 +225,10 @@ def _append_tts_json_record(                                                    
                         arr = []
             except FileNotFoundError:
                 arr = []
-            arr.append({"text": text, "emotion": emotion, "mp3": mp3_b64})
+            record = {"text": text, "emotion": emotion, "mp3": mp3_b64}
+            if duration_sec is not None:                                              ### NEW: 如果提供了时长
+                record["duration_sec"] = duration_sec                                 ### NEW: 保存到 JSON
+            arr.append(record)
             with open(json_file, "w", encoding="utf-8") as f:
                 json.dump(arr, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -296,12 +308,13 @@ def misty_humanlike_speaking(                                                   
     r_play = requests.post(play_url, json=play_payload, timeout=timeout_play_sec)      ### 发起播放
     r_play.raise_for_status()                                                          ### 抛出 HTTP 错误
     play_result = r_play.json()                                                        ### 解析播放返回
-    # ------------------------ [修改] 将本次 TTS 结果记录到固定 JSON 文件（mp3=Base64） -------------------
+    # ------------------------ [修改] 将本次 TTS 结果记录到固定 JSON 文件（mp3=Base64 + duration） ---
     try:
-        _append_tts_json_record(                                                       ### 追加写 {text, emotion, mp3}
+        _append_tts_json_record(                                                       ### 追加写 {text, emotion, mp3, duration_sec}
             text=text,                                                                 ### 原文
             emotion=emotion,                                                           ### 规范化后的情绪（可能为 None）
             mp3_b64=b64,                                                               ### 纯 base64，不写 Misty 文件名
+            duration_sec=duration_sec,                                                 ### NEW: 传入准确的时长
             json_file="temp_emotion_speaking_mp3.json",                                ### 固定文件名
         )
     except Exception as _e:

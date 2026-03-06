@@ -1,7 +1,7 @@
 {
-    "misty_ip": "YOUR_MISTY_ROBOT_IP",
-    "openai_api_key": "YOUR_OPENAI_API_KEY",
-    "llm_model": "gpt-5-nano-2025-08-07",
+    "misty_ip": "",
+    "openai_api_key": "",
+    "llm_model": "gpt-4.1-mini",
     "stronger_model_name": "gpt-5-2025-08-07",
     "retries": 1,
     "threshold": 0.4,
@@ -9,5 +9,7 @@
     "log_dir": "./logs",
     "reg_path": "./misty_proc_registry.json",
     "CB_SUMMARY_JSON_dir": "./cb_functions_summary.json",
-    "collection": "text-embedding-3-large"
+    "collection": "text-embedding-3-large",
+    "use_local_audio": true
 }
+  

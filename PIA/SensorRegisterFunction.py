@@ -1,11 +1,25 @@
 # -*- coding: utf-8 -*-
-import os, json
+import os, json, random, threading, sys
 import string
 from typing import List, Tuple, Optional, Dict, Any
 from typing import List, Optional, Tuple, Annotated
 
 from .Misty_Process_Scheduler import start_worker_bg
 from .Misty_Process_Tools import stop_all_workers, stop_worker_by_key, cleanup_orphan_workers
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Misty_Call_Back_Func'))
+from CUBS_Misty_Only_Raw_Actions import Robot
+
+_ACK_WORDS = ["Sure.", "OK.", "Alright.", "Done."]
+
+def _speak_ack(ip: str) -> None:
+    """Speak a random acknowledgement word in a background thread."""
+    def _do():
+        try:
+            Robot(ip).speak(text=random.choice(_ACK_WORDS), flush=True)
+        except Exception:
+            pass
+    threading.Thread(target=_do, daemon=True).start()
 
 def load_config(config_filename="config.json"):
     """
@@ -36,7 +50,7 @@ CB_SUMMARY_JSON = cfg["CB_SUMMARY_JSON_dir"]
 # --- Valid sets for event validation ---
 VALID_BUMP_SENSORS = {"bfl", "bfr", "brl", "brr"}  # bump sensors
 VALID_CAP_SENSORS = {"Chin", "Scruff", "HeadRight", "HeadLeft", "HeadBack", "HeadFront"}  # capacitive sensors
-AVAILABLE_TYPES = {"TouchSensor", "BumpSensor"}
+AVAILABLE_TYPES = {"TouchSensor", "BumpSensor", "OneTimeCall"}
 
 
 def _load_cb_summary(json_path: str = CB_SUMMARY_JSON) -> Dict[str, Any]:
@@ -158,6 +172,7 @@ def manage_misty_sensor_tasks(
                 log_dir=log_dir,
             )
             results.append({"action": "ADD", "status": "success", "result": ret})
+            _speak_ack(ip)
 
         elif action == "DELETE_ONE":
             ok = stop_worker_by_key(event_type=event_type, position=position, reg_path=reg_path)
@@ -168,6 +183,7 @@ def manage_misty_sensor_tasks(
                 "position": position,
                 "stopped": ok
             })
+            _speak_ack(ip)
 
         elif action == "DELETE_ALL":
             # 先停止注册表中的进程
@@ -182,5 +198,6 @@ def manage_misty_sensor_tasks(
                 "orphan_count": orphan_count,
                 "total_stopped": total_count
             })
+            _speak_ack(ip)
 
     return results

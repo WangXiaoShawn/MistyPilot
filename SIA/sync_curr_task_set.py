@@ -10,6 +10,7 @@ import os
 from pydantic import BaseModel, ValidationError, field_validator, ConfigDict
 from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_core.models import ModelFamily
 
 STATE_FILE = "misty_speaking_action_state.json"
 
@@ -106,7 +107,16 @@ def _get_cached_client(api_key: str, model: str) -> OpenAIChatCompletionClient:
     cache_key = f"{api_key[:10]}_{model}"
     if cache_key in _client_cache:
         return _client_cache[cache_key]
-    client = OpenAIChatCompletionClient(model=model, api_key=api_key)
+    client = OpenAIChatCompletionClient(
+        model=model, 
+        api_key=api_key,
+        model_info={
+            "vision": False,
+            "function_calling": True,
+            "json_output": False,
+            "family": ModelFamily.GPT_5,
+        }
+    )
     _client_cache[cache_key] = client
     return client
 
@@ -158,7 +168,7 @@ def _ensure_state_schema(state: dict) -> dict:
 async def clarify_async(
     user_description: str,
     openai_api_key: str,
-    model: str = "gpt-5-nano-2025-08-07",
+    model: str = "gpt-5-nano",
     retries: int = 2
 ) -> dict:
     model_client = _get_cached_client(openai_api_key, model)
@@ -194,7 +204,7 @@ def _run_coro_in_thread(coro) -> Any:
 def clarify(
     user_description: str,
     openai_api_key: str,
-    model: str = "gpt-5-nano-2025-08-07",
+    model: str = "gpt-5-nano",
     retries: int = 2
 ) -> dict:
     coro = clarify_async(
@@ -221,7 +231,7 @@ def save_state(state: dict):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(_ensure_state_schema(state), f, ensure_ascii=False, indent=2)
 
-def clarify_and_update(user_input: str, openai_api_key: str, model: str = "gpt-5-nano-2025-08-07") -> dict:
+def clarify_and_update(user_input: str, openai_api_key: str, model: str = "gpt-5-nano") -> dict:
     """
     读取状态 -> 调用 clarify -> 保存状态
     """

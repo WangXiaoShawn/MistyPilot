@@ -4,7 +4,20 @@ import os
 
 THINKING_STATE_FILE = "thinking_model_power.json"   ### 你的json文件名，确保存在 {"model_power": "low"} 这样的结构
 
-def load_thinking_model_power(default_power: str = "gpt-5-nano-2025-08-07") -> str:
+def _load_config_default_model():
+    """从配置文件加载默认基础模型"""
+    config_path = os.path.join(os.path.dirname(__file__), "..", "MistyPilot_config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        return config.get("llm_model", "gpt-5-nano")
+    except Exception:
+        return "gpt-5-nano"  # 最终兜底
+
+def load_thinking_model_power(default_power: str = None) -> str:
+    if default_power is None:
+        default_power = _load_config_default_model()
+    
     if not os.path.exists(THINKING_STATE_FILE):
         data = {"model_power": default_power}
         with open(THINKING_STATE_FILE, "w", encoding="utf-8") as f:

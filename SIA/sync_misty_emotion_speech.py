@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-                                                             ### 文件编码
+# ==================== DEPRECATED / 已废弃 ====================
+# 此文件已废弃，不再使用 Misty 播放音频
+# 请使用以下替代方案：
+# - streaming_slow_thinking_emotion_speech.py (流式本地播放)
+# - misty_fast_thinking_emotion_speech.py (快思考本地播放)
+# =============================================================
 # one_shot_tts_misty.py                                                             ### 文件名
 # 功能：OpenAI TTS -> 上传到 Misty -> 播放（可与动作并行；用 MP3 时长自动驱动动作 pause_before_reset；支持 emotion 自动填充 speed/instructions/动作）  ### 说明
 
@@ -192,9 +198,10 @@ def _append_tts_json_record(                                                    
     text: str,                                                                        ### 说话文本
     emotion: Optional[str],                                                           ### 情绪（规范名或 None）
     mp3_b64: str,                                                                     ### mp3 的 base64 字符串
+    duration_sec: Optional[float] = None,                                             ### NEW: 音频时长（秒）
     json_file: str = "temp_emotion_speaking_mp3.json",                                ### 保存文件名
 ) -> None:                                                                            ### 无返回
-    """增量保存：读取现有 list，append 当前 {text, emotion, mp3}，再写回。"""                   ###
+    """增量保存：读取现有 list，append 当前 {text, emotion, mp3, duration_sec}，再写回。"""      ###
     try:
         with _json_lock:                                                              ### 并发写保护
             arr = []
@@ -205,7 +212,10 @@ def _append_tts_json_record(                                                    
                         arr = []
             except FileNotFoundError:
                 arr = []
-            arr.append({"text": text, "emotion": emotion, "mp3": mp3_b64})
+            record = {"text": text, "emotion": emotion, "mp3": mp3_b64}
+            if duration_sec is not None:                                              ### NEW: 如果提供了时长
+                record["duration_sec"] = duration_sec                                 ### NEW: 保存到 JSON
+            arr.append(record)
             with open(json_file, "w", encoding="utf-8") as f:
                 json.dump(arr, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -301,12 +311,13 @@ def misty_humanlike_speaking(                                                   
     r_play = _post_with_retry(play_url, play_payload, timeout_play_sec)                ### ✅ 带重试播放
     play_result = r_play.json()                                                        ### 解析播放返回
 
-    # ------------------------ 将本次 TTS 结果记录到固定 JSON 文件（mp3=Base64） ------------------------
+    # ------------------------ 将本次 TTS 结果记录到固定 JSON 文件（mp3=Base64 + duration） -----------
     try:
-        _append_tts_json_record(                                                       ### 追加写 {text, emotion, mp3}
+        _append_tts_json_record(                                                       ### 追加写 {text, emotion, mp3, duration_sec}
             text=text,
             emotion=emotion,
             mp3_b64=b64,
+            duration_sec=duration_sec,                                                 ### NEW: 传入准确的时长
             json_file="temp_emotion_speaking_mp3.json",
         )
     except Exception as _e:

@@ -20,14 +20,10 @@ def perform_rage(misty_ip: str, api_key: Optional[str] = None) -> None:
         misty.emotion_Rage4(alpha=1.0)                    ### face: Rage4
         misty.transition_led(255, 0, 0, 80, 0, 0,         ### LED: red ↔ dark red blink
                              transition_type="Blink",
-                             time_ms=150)                  ### fast blink
-        try:
-            misty.sound_Anger4(volume=100)                ### roar (high intensity)
-        except Exception:
-            misty.sound_Rage(volume=100)                  ### fallback
+                             time_ms=150)                  ### fast blink             ### fallback
 
         def _arms_alternate_loop():                       ### inner: arms alternate
-            cycles = 3                                    ### cycles
+            cycles = 4                                    ### cycles
             pause = 0.25                                  ### pause per step
             for _ in range(cycles):                       ### loop
                 misty.move_arms(leftArmPosition=-29, rightArmPosition=90,
@@ -42,7 +38,7 @@ def perform_rage(misty_ip: str, api_key: Optional[str] = None) -> None:
         def _head_left_right():                           ### inner: head L↔R
             yaw_deg  = 78                                 ### yaw amplitude (≤81 safe)
             pitch_deg = 10                                ### slight forward tilt
-            cycles   = 2                                  ### cycles
+            cycles   = 4                                  ### cycles
             pause    = 0.30                               ### dwell
             amp = max(0.0, min(abs(yaw_deg), 81.0))       ### clamp yaw
             pit = max(-40.0, min(pitch_deg, 26.0))        ### clamp pitch
@@ -60,7 +56,7 @@ def perform_rage(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_left_right)           ### thread: head
         t1.start(); t2.start()                                   ### start both
         t1.join(); t2.join()                                     ### wait both
-        time.sleep(0.5)                                          ### settle
+        time.sleep(5)                                          ### settle
     finally:
         misty.return_to_normal()    ### 你的 Robot 封装
 
@@ -76,10 +72,7 @@ def perform_happy(misty_ip: str, api_key: Optional[str] = None) -> None:
         misty.emotion_Love(alpha=1.0)                    ### 面部：爱心/恋爱表情
         misty.transition_led(255,215,0, 255,255,255,     ### LED：金黄↔白 呼吸
                               transition_type="Breathe", time_ms=700)  ### 柔和过渡
-        try:
-            misty.sound_Joy3(volume=100)                 ### 欢呼音效
-        except Exception:
-            misty.sound_PhraseHello(volume=90)           ### 回退到问候音
+      
 
         def _arms_wave_alternate():                      ### 内部子动作：双臂交替挥动
             cycles = 4                                   ### 循环次数
@@ -117,7 +110,7 @@ def perform_happy(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_yaw_shiver)                ### 线程2：头部
         t1.start(); t2.start()                                        ### 启动并行
         t1.join(); t2.join()                                          ### 等待结束
-        time.sleep(0.5)                                               ### 稍作停留
+        time.sleep(5)                                               ### 稍作停留
     finally:
         misty.return_to_normal()                           
         
@@ -134,14 +127,7 @@ def perform_sad(misty_ip: str, api_key: Optional[str] = None) -> None:
         misty.emotion_Sadness(alpha=1.0)                       ### 表情：伤心
         misty.transition_led(0, 120, 255, 0, 0, 40,            ### LED：蓝↔暗蓝 呼吸
                              transition_type="Breathe", 
-                             time_ms=900)                      ### 柔和、偏慢
-        try:
-            misty.sound_Sadness3(volume=75)                    ### 伤心音效（中强）
-        except Exception:
-            try:
-                misty.sound_Sadness(volume=75)                 ### 回退到基础伤心
-            except Exception:
-                pass                                           ### 没音效就静默
+                             time_ms=900)                      ### 柔和、偏慢                                 ### 没音效就静默
 
         def _arms_sad_swing():                                 ### 子动作1：手臂小幅交替（整体下垂）
             cycles = 4                                         ### 循环次数
@@ -189,7 +175,7 @@ def perform_sad(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_sad_sway)           ### 线程2：头部
         t1.start(); t2.start()                                 ### 并行启动
         t1.join(); t2.join()                                   ### 等待结束
-        time.sleep(0.5)                                        ### 稍作停留
+        time.sleep(4)                                        ### 稍作停留
     finally:
         misty.return_to_normal()   ### 统一还原（表情/灯/手/头）
         
@@ -255,7 +241,7 @@ def perform_fear(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_fear_shiver)            ### 线程：头部 ###
         t1.start(); t2.start()                                     ### 并行启动 ###
         t1.join(); t2.join()                                       ### 等待结束 ###
-        time.sleep(0.4)                                            ### 稍停 ###
+        time.sleep(4)                                            ### 稍停 ###
     finally:
         misty.return_to_normal()                                    ### 统一复位 ###
 
@@ -271,13 +257,7 @@ def perform_surprise(misty_ip: str, api_key: Optional[str] = None) -> None:
         misty.emotion_Surprise(alpha=1.0)                         ### 面部：惊讶 ###
         misty.transition_led(255, 255, 255, 0, 220, 255,          ### LED：白↔青 速闪 ###
                              transition_type="Blink", time_ms=180) ### 瞬时反应感 ###
-        try:
-            misty.sound_Amazement2(volume=95)                     ### 惊叹/惊讶音效 ###
-        except Exception:
-            try:
-                misty.sound_Awe2(volume=95)                       ### 降级：Awe ###
-            except Exception:
-                misty.sound_PhraseUhOh(volume=90)                 ### 回退短语 ###
+                ### 回退短语 ###
 
         def _arms_surprise_burst():                               ### 子动作1：双臂骤抬循环 ###
             cycles, pause_up, pause_dn = 3, 0.18, 0.20            ### 次数与停顿 ###
@@ -315,7 +295,7 @@ def perform_surprise(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_surprise_scan)          ### 线程：头部 ###
         t1.start(); t2.start()                                     ### 并行启动 ###
         t1.join(); t2.join()                                       ### 等待结束 ###
-        time.sleep(0.4)                                            ### 稍停 ###
+        time.sleep(4)                                            ### 稍停 ###
     finally:
         misty.return_to_normal()                                    ### 统一复位 ###
 
@@ -330,17 +310,7 @@ def perform_disgust(misty_ip: str, api_key: Optional[str] = None) -> None:
     try:                                                          ### 保护块 ###
         misty.emotion_Disgust(alpha=1.0)                          ### 面部：厌恶 ###
         misty.transition_led(0, 180, 0, 60, 90, 0,                ### LED：绿↔橄榄绿 呼吸 ###
-                             transition_type="Breathe", time_ms=800)### 稍慢、嫌弃感 ###
-        try:
-            misty.sound_Disgust3(volume=85)                       ### 厌恶音效（强）###
-        except Exception:
-            try:
-                misty.sound_Disgust2(volume=85)                   ### 降级 ###
-            except Exception:
-                try:
-                    misty.sound_Disgust(volume=85)                ### 再降级 ###
-                except Exception:
-                    pass                                          ### 静默 ###
+                             transition_type="Breathe", time_ms=800)### 稍慢、嫌弃感 ###                                     ### 静默 ###
 
         def _arms_disgust_flick():                                ### 子动作1：甩开/拨开 ###
             cycles, pause = 4, 0.28                               ### 次数与停顿 ###
@@ -377,7 +347,7 @@ def perform_disgust(misty_ip: str, api_key: Optional[str] = None) -> None:
         t2 = threading.Thread(target=_head_disgust_turnaway)        ### 线程：头部 ###
         t1.start(); t2.start()                                      ### 并行启动 ###
         t1.join(); t2.join()                                        ### 等待结束 ###
-        time.sleep(0.4)                                             ### 稍停 ###
+        time.sleep(4)                                             ### 稍停 ###
     finally:
         misty.return_to_normal()    
         
@@ -388,6 +358,43 @@ def perform_wave_once_right(misty_ip: str, api_key: Optional[str] = None) -> Non
         # --- 头部先朝右 ---
         misty.move_head(pitch=0, roll=0, yaw=12, velocity=95, units="degrees")
         time.sleep(0.2)
+
+        # --- 右手最大幅度上举 ---
+        misty.move_arms(leftArmPosition=90,        ### 左臂保持下垂
+                        rightArmPosition=-29,      ### -29° 是 Misty 右臂最大安全上举角度
+                        leftArmVelocity=60,
+                        rightArmVelocity=100,
+                        units="degrees")
+        time.sleep(2.0)                 ### 在最高点停留 2 秒
+
+        # --- 右手略放，形成挥手 ---
+        misty.move_arms(leftArmPosition=90,
+                        rightArmPosition=-10,      ### 放下一些但仍抬着
+                        leftArmVelocity=60,
+                        rightArmVelocity=90,
+                        units="degrees")
+        time.sleep(0.3)
+
+        # --- 头部回正，手臂友好待机 ---
+        misty.move_head(pitch=0, roll=0, yaw=0, velocity=95, units="degrees")
+        misty.move_arms(leftArmPosition=90,
+                        rightArmPosition=-15,      ### 右臂保持略上举，表示友好
+                        leftArmVelocity=70,
+                        rightArmVelocity=80,
+                        units="degrees")
+        time.sleep(0.3)
+    finally:
+        misty.return_to_normal()      ### 统一复位（表情/灯/手/头）
+
+
+
+
+def perform_take_photo_wave_once_right(misty_ip: str, api_key: Optional[str] = None) -> None:
+    """右手高举一次（最大幅度上举 → 停留2s → 略放），伴随头部右看"""
+    misty = Robot(misty_ip)               ### 构造机器人
+    try:
+        # --- 头部先朝右 ---
+  
 
         # --- 右手最大幅度上举 ---
         misty.move_arms(leftArmPosition=90,        ### 左臂保持下垂
