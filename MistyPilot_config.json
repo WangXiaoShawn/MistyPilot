@@ -1,7 +1,7 @@
 {
     "misty_ip": "",
     "openai_api_key": "",
-    "llm_model": "gpt-4.1-mini",
+    "llm_model": "",
     "stronger_model_name": "gpt-5-2025-08-07",
     "retries": 1,
     "threshold": 0.4,
