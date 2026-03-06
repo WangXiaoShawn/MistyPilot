@@ -102,31 +102,6 @@ On startup, the system loads `cb_functions_summary.json` and builds the PIA rout
 
 
 
----
-
-## Experiment & Dataset
-
-Experiment results and datasets are not included in this repository. For access, please contact:
-
-**Xiao Wang** — xwang277@buffalo.edu (please use your .edu email)
-
----
-
-## Citation
-
-If you find this project helpful, please cite our paper:
-
-```bibtex
-@article{wang2025mistypilot,
-  title     = {MistyPilot: An Agentic Fast-Slow Thinking LLM Framework for Misty Social Robots},
-  author    = {Wang, Xiao and Dong, Lu and Sun, Jingchen and Nwogu, Ifeoma and Setlur, Srirangaraj and Govindaraju, Venu},
-  journal   = {arXiv preprint arXiv:2603.03640},
-  year      = {2025},
-  url       = {https://arxiv.org/pdf/2603.03640}
-}
-```
-
----
 
 ## License
 
