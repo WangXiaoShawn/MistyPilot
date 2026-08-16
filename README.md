@@ -1,7 +1,12 @@
 # MistyPilot
 
-> 📄 **Paper**: [MistyPilot: An Agentic Fast–Slow Thinking LLM Framework for Misty Social Robots](https://arxiv.org/pdf/2603.03640)
-> Xiao Wang\*, Lu Dong\*, Jingchen Sun, Ifeoma Nwogu, Srirangaraj Setlur, Venu Govindaraju
+🎉 **Accepted at [ACVR 2026](https://iplab.dmi.unict.it/acvr2026/) (ECCV 2026 Workshop) — Oral & Poster**
+
+> 📄 **Paper**: MistyPilot: Enabling Social-Robot Control through Multi-Agent LLM Skill Orchestration
+>
+> 👥 **Authors**: Xiao Wang\*, Lu Dong\*, Ifeoma Nwogu, Srirangaraj Setlur, and Venu Govindaraju
+>
+> 🏛️ **Venue**: 14th International Workshop on Assistive Computer Vision and Robotics (ACVR), in conjunction with ECCV 2026 — Malmö, Sweden, September 8, 2026
 
 ---
 
@@ -12,6 +17,8 @@
 ---
 
 ## Installation
+
+> Local audio playback (`afplay`) and the key-hold recording loop currently target **macOS**.
 
 ```bash
 conda create -n MistyPilot python=3.10
@@ -49,7 +56,7 @@ Edit `MistyPilot_config.json` with your robot IP, OpenAI API Key, and model name
 | `llm_model` | Default lightweight model for fast reasoning |
 | `stronger_model_name` | Stronger model used when Slow Thinking or UPGRADE is triggered |
 | `threshold` | Fast Thinking retrieval threshold (cosine distance); below this value is treated as a cache hit |
-| `use_local_audio` | `true` to play local MP3 emotion sound effects, `false` to skip |
+| `use_local_audio` | `true` to play the bundled MP3 sound effects (`Misty_Call_Back_Func/EffectSound/`, `Misty_Call_Back_Func/MistySpeaking/`) on the host machine, `false` to skip |
 
 ---
 
@@ -82,6 +89,13 @@ def cb_<emotion>(evt, misty_ip, api_key=None):
 
 > The docstring is the sole basis for PIA routing. Keywords should cover diverse phrasings; no implementation details needed.
 
+To play a local sound effect from a skill, use the shared helper instead of hardcoding paths:
+
+```python
+from local_audio import play_emotion_sounds
+play_emotion_sounds(robot, "<EffectSound file>.mp3", "<MistySpeaking file>.mp3")
+```
+
 After adding, re-run `Misty_callback_summary.py` to auto-register — no changes to routing logic required.
 
 ---
@@ -105,4 +119,4 @@ On startup, the system loads `cb_functions_summary.json` and builds the PIA rout
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+This project is released under the [MIT License](LICENSE).

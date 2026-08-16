@@ -72,6 +72,8 @@ misty_emotion_action_speaking_store/
 
 # === 注册表和状态文件 ===
 misty_proc_registry.json
+misty_proc_registry.json.lock
+misty_speech_lock.json
 cb_functions_summary.json
 *_state.json
 temp_*.json
@@ -82,6 +84,9 @@ thinking_model_power.json
 *.mp3
 *.mp4
 *.avi
+# 情绪技能自带的音效素材需要随仓库发布
+!Misty_Call_Back_Func/EffectSound/*.mp3
+!Misty_Call_Back_Func/MistySpeaking/*.mp3
 
 # === 系统文件 ===
 .DS_Store
